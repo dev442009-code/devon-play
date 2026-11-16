@@ -678,7 +678,22 @@ async function waitPage(id){
   const sum=o=>`<div class="sum"><div><span>Game</span><b>${GAMES[o.game]?.n||o.game}</b></div><div><span>Package</span><b>${esc(o.amount)} ${esc(o.cur)}</b></div><div><span>Player ID</span><b>${esc(o.playerId)}${o.serverId?' ('+esc(o.serverId)+')':''}</b></div><div><span>Paid</span><b>${fmt(o.price)} MMK</b></div></div>`;
   async function tick(){
     const o=(await kv.get('orders',[])).find(x=>x.id===id);
-    if(!o){stp.innerHTML='';st.innerHTML=`<div class="big badc">${ic(I.x,50,2.6)}</div><h2>Order not found</h2><button class="btn" onclick="__home()">Back to home</button>`;return}
+    try {
+  const response = await fetch(
+    'https://devon-notify-2026.dev442009.workers.dev/api/order-status/' + encodeURIComponent(id),
+    { cache: 'no-store' }
+  );
+
+  const result = await response.json();
+
+  if (!response.ok || !result.success) {
+    return;
+  }
+
+  o.status = result.status;
+} catch (error) {
+  return;
+}
     if(o.status===last)return;last=o.status;clearInterval(cd);
     stp.innerHTML=stepper(o.status==='delivered'?5:4);
     if(o.status==='pending'){
