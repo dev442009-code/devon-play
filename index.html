@@ -410,7 +410,7 @@ function compress(file,max=1000,q=.72){return new Promise((res,rej)=>{const r=ne
 /* ===== TELEGRAM NOTIFY (calls the secure function on Netlify) ===== */
 function notifyTG(o){
   const body=JSON.stringify({id:o.id,game:GAMES[o.game].n,amount:o.amount,cur:o.cur,price:o.price,bonus:o.bonus,playerId:o.playerId,serverId:o.serverId,phone:o.phone,telegram:o.tg,method:METHODS[o.method],screenshot:o.screenshot});
-  const go=n=>fetch('/.netlify/functions/notify',{method:'POST',headers:{'Content-Type':'application/json'},body}).then(r=>{if(!r.ok)throw 0}).catch(()=>{if(n<2)setTimeout(()=>go(n+1),2500)});
+  const go=n=>fetch('https://devon-notify-2026.dev442009.workers.dev',{method:'POST',headers:{'Content-Type':'application/json'},body}).then(r=>{if(!r.ok)throw 0}).catch(()=>{if(n<2)setTimeout(()=>go(n+1),2500)});
   go(0);
 }
 
