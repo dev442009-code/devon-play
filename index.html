@@ -666,6 +666,8 @@ localStorage.setItem('orderId',id);
 S={};
 sessionStorage.removeItem('S');
 location.hash='#/wait/'+id;
+}
+
 /* ===== WAIT PAGE ===== */
 async function waitPage(id){
   if(!id){location.hash='#/';return}
