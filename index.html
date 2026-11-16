@@ -336,15 +336,25 @@ footer p{color:var(--mut);font-size:12px;margin-top:10px}
 <div id="app"></div>
 
 <script>
-/* ===== DATA LAYER (stage 1: browser IndexedDB, next stage: online database) ===== */
-const DBP=new Promise((res,rej)=>{const r=indexedDB.open('devon',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>res(r.result);r.onerror=rej});
-const kv={async get(k,d){const db=await DBP;return new Promise(r=>{const q=db.transaction('kv').objectStore('kv').get(k);q.onsuccess=()=>r(q.result===undefined?d:q.result);q.onerror=()=>r(d)})},
- async set(k,v){const db=await DBP;return new Promise(r=>{const t=db.transaction('kv','readwrite');t.objectStore('kv').put(v,k);t.oncomplete=()=>r()})}};
-let lock=Promise.resolve();
-const upd=(k,d,fn)=>lock=lock.then(async()=>{const v=await kv.get(k,d);const n=fn(v);await kv.set(k,n===undefined?v:n)});
-const SEED=[['pubg','60',1500,0],['pubg','325',7500,0],['pubg','660',15000,0],['pubg','1800',37000,0],
-['hok','80',1700,0],['hok','240',5000,0],['mlbb','86',2500,0],['mlbb','172',5000,0],['ff','100',2200,0],['ff','310',6400,0]];
-async function seed(){const it=await kv.get('items',null);if(it===null)await kv.set('items',SEED.map((s,i)=>({id:'i'+i,game:s[0],amount:s[1],price:s[2],bonus:s[3],img:''})))}
+/* ===== DATA LAYER (online: Cloudflare Worker + D1 database) ===== */
+const API='https://devon-notify-2026.dev442009.workers.dev';
+let _imgs=null,_imgsT=0;
+const kv={
+  async get(k,d){
+    try{
+      if(k==='imgs'){
+        if(!_imgs||Date.now()-_imgsT>15000){
+          const r=await fetch(API+'/api/images');const j=await r.json();
+          if(!j.success)throw 0;
+          _imgs=j.images||[];_imgsT=Date.now();
+        }
+        return _imgs;
+      }
+      const r=await fetch(API+'/api/kv/'+k,{cache:'no-store'});const j=await r.json();
+      return(j&&j.success&&j.value!=null)?j.value:d;
+    }catch(e){return d}
+  }
+};
 
 /* ===== ICONS ===== */
 const ic=(p,s=20,w=1.8)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -407,11 +417,17 @@ function slider(el,urls,ms=3200,dots=false){
 }
 function compress(file,max=1000,q=.72){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>{const im=new Image();im.onload=()=>{const s=Math.min(1,max/Math.max(im.width,im.height));const w=Math.round(im.width*s),h=Math.round(im.height*s);const c=document.createElement('canvas');c.width=w;c.height=h;const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,w,h);x.imageSmoothingQuality='high';x.drawImage(im,0,0,w,h);res(c.toDataURL('image/jpeg',q))};im.onerror=rej;im.src=r.result};r.onerror=rej;r.readAsDataURL(file)})}
 
-/* ===== TELEGRAM NOTIFY (calls the secure function on Netlify) ===== */
-function notifyTG(o){
+/* ===== SEND ORDER (Worker saves it in D1 and sends the Telegram message) ===== */
+async function sendOrder(o){
   const body=JSON.stringify({id:o.id,game:GAMES[o.game].n,amount:o.amount,cur:o.cur,price:o.price,bonus:o.bonus,playerId:o.playerId,serverId:o.serverId,phone:o.phone,telegram:o.tg,method:METHODS[o.method],screenshot:o.screenshot});
-  const go=n=>fetch('/.netlify/functions/notify',{method:'POST',headers:{'Content-Type':'application/json'},body}).then(r=>{if(!r.ok)throw 0}).catch(()=>{if(n<2)setTimeout(()=>go(n+1),2500)});
-  go(0);
+  for(let n=0;n<3;n++){
+    try{
+      const r=await fetch(API+'/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body});
+      if(r.ok||r.status===409)return true;
+    }catch(e){}
+    await new Promise(res=>setTimeout(res,2000));
+  }
+  return false;
 }
 
 /* ===== EFFECTS ===== */
@@ -624,10 +640,13 @@ async function payPage(){
   upz.ondragover=e=>{e.preventDefault();upz.classList.add('ov')};upz.ondragleave=()=>upz.classList.remove('ov');
   upz.ondrop=e=>{e.preventDefault();upz.classList.remove('ov');take(e.dataTransfer.files[0])};
   cont.onclick=async()=>{if(!shot)return;cont.disabled=true;cont.textContent='Sending...';
-    const id='D'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+    const id=window.__pid||(window.__pid='D'+Date.now().toString(36)+Math.random().toString(36).slice(2,5));
     const o={id,game:S.game,amount:String(S.item.amount),cur:g.cur,price:Number(S.item.price),bonus:Number(S.item.bonus||0),playerId:S.playerId,serverId:S.serverId||'',phone:S.phone,tg:S.tg||'',method:S.method,screenshot:shot,status:'pending',createdAt:Date.now()};
-    notifyTG(o); /* Telegram message goes out immediately */
-    await upd('orders',[],a=>[o,...a]);localStorage.setItem('orderId',id);
+    const ok=await sendOrder(o);
+    if(!ok){alert('Could not send your order. Please check your internet and try again.');cont.disabled=false;cont.innerHTML='Continue '+ic(I.arrow,18,2.2);return}
+    window.__pid=null;
+    localStorage.setItem('orderId',id);
+    localStorage.setItem('o_'+id,JSON.stringify({...o,screenshot:''}));
     S={};sessionStorage.removeItem('S');location.hash='#/wait/'+id};
 }
 
@@ -639,8 +658,17 @@ async function waitPage(id){
   window.__home=()=>{localStorage.removeItem('orderId');location.hash='#/'};
   const SET=await getSet();
   const sum=o=>`<div class="sum"><div><span>Game</span><b>${GAMES[o.game]?.n||o.game}</b></div><div><span>Package</span><b>${esc(o.amount)} ${esc(o.cur)}</b></div><div><span>Player ID</span><b>${esc(o.playerId)}${o.serverId?' ('+esc(o.serverId)+')':''}</b></div><div><span>Paid</span><b>${fmt(o.price)} MMK</b></div></div>`;
+  let known='pending';
   async function tick(){
-    const o=(await kv.get('orders',[])).find(x=>x.id===id);
+    let o=null;try{o=JSON.parse(localStorage.getItem('o_'+id)||'null')}catch(e){}
+    if(o){
+      try{
+        const r=await fetch(API+'/api/order-status/'+encodeURIComponent(id),{cache:'no-store'});
+        if(r.status===404)o=null;
+        else{const j=await r.json();if(j&&j.success)known=j.status}
+      }catch(e){}
+      if(o)o.status=known;
+    }
     if(!o){stp.innerHTML='';st.innerHTML=`<div class="big badc">${ic(I.x,50,2.6)}</div><h2>Order not found</h2><button class="btn" onclick="__home()">Back to home</button>`;return}
     if(o.status===last)return;last=o.status;clearInterval(cd);
     stp.innerHTML=stepper(o.status==='delivered'?5:4);
@@ -662,10 +690,10 @@ async function waitPage(id){
       st.innerHTML=`<div class="big badc">${ic(I.x,50,2.6)}</div><h2>Payment could not be verified</h2><p class="m">Please contact us:<br><b style="color:#fff">${esc(SET.contactPhone)}</b><br>${esc(SET.contactEmail)}</p><button class="btn" onclick="__home()">Back to home</button>`;
     }
   }
-  await tick();timers.push(setInterval(tick,1500));
+  await tick();timers.push(setInterval(tick,2500));
 }
 
-seed().then(route);
+route();
 </script>
 </body>
 </html>
