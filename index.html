@@ -654,11 +654,18 @@ async function payPage(){
   cont.onclick=async()=>{if(!shot)return;cont.disabled=true;cont.textContent='Sending...';
     const id='D'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
     const o={id,game:S.game,amount:String(S.item.amount),cur:g.cur,price:Number(S.item.price),bonus:Number(S.item.bonus||0),playerId:S.playerId,serverId:S.serverId||'',phone:S.phone,tg:S.tg||'',method:S.method,screenshot:shot,status:'pending',createdAt:Date.now()};
-    notifyTG(o); /* Telegram message goes out immediately */
-    await upd('orders',[],a=>[o,...a]);localStorage.setItem('orderId',id);
-    S={};sessionStorage.removeItem('S');location.hash='#/wait/'+id};
+   try {
+  await notifyTG(o);
+} catch (error) {
+  alert('Order submission failed. Please try again.');
+  return;
 }
 
+await upd('orders',[],a=>[o,...a]);
+localStorage.setItem('orderId',id);
+S={};
+sessionStorage.removeItem('S');
+location.hash='#/wait/'+id;
 /* ===== WAIT PAGE ===== */
 async function waitPage(id){
   if(!id){location.hash='#/';return}
